@@ -1,7 +1,6 @@
 {
   "packs": [
-    "discord.json",
-    "emotes.json"
+    "kakiekamni.json"
   ],
-  "homeserver_url": "https://matrix.raspad.space"
+  "homeserver_url": "https://matrix-client.matrix.org"
 }
