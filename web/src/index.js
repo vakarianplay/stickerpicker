@@ -15,19 +15,12 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import { html, render, Component } from "../lib/htm/preact.js"
 import { Spinner } from "./spinner.js"
-import { SearchBox } from "./search-box.js"
 import * as widgetAPI from "./widget-api.js"
 import * as frequent from "./frequently-used.js"
 
 // The base URL for fetching packs. The app will first fetch ${PACK_BASE_URL}/index.json,
 // then ${PACK_BASE_URL}/${packFile} for each packFile in the packs object of the index.json file.
 const PACKS_BASE_URL = "packs"
-
-let INDEX = `${PACKS_BASE_URL}/index.json`
-const params = new URLSearchParams(document.location.search)
-if (params.has('config')) {
-	INDEX = params.get("config")
-}
 // This is updated from packs/index.json
 let HOMESERVER_URL = "https://matrix-client.matrix.org"
 
@@ -37,22 +30,19 @@ const makeThumbnailURL = mxc => `${HOMESERVER_URL}/_matrix/media/r0/thumbnail/${
 // This is also used to fix scrolling to sections on Element iOS
 const isMobileSafari = navigator.userAgent.match(/(iPod|iPhone|iPad)/) && navigator.userAgent.match(/AppleWebKit/)
 
-const supportedThemes = ["light", "dark", "black"]
+export const parseQuery = str => Object.fromEntries(
+	str.split("&")
+		.map(part => part.split("="))
+		.map(([key, value = ""]) => [key, value]))
 
-const defaultState = {
-	packs: [],
-	filtering: {
-		searchTerm: "",
-		packs: [],
-	},
-}
+const supportedThemes = ["light", "dark", "black"]
 
 class App extends Component {
 	constructor(props) {
 		super(props)
-		this.defaultTheme = params.get("theme")
+		this.defaultTheme = parseQuery(location.search.substr(1)).theme
 		this.state = {
-			packs: defaultState.packs,
+			packs: [],
 			loading: true,
 			error: null,
 			stickersPerRow: parseInt(localStorage.mauStickersPerRow || "4"),
@@ -63,7 +53,6 @@ class App extends Component {
 				stickerIDs: frequent.get(),
 				stickers: [],
 			},
-			filtering: defaultState.filtering,
 		}
 		if (!supportedThemes.includes(this.state.theme)) {
 			this.state.theme = "light"
@@ -76,7 +65,6 @@ class App extends Component {
 		this.imageObserver = null
 		this.packListRef = null
 		this.navRef = null
-		this.searchStickers = this.searchStickers.bind(this)
 		this.sendSticker = this.sendSticker.bind(this)
 		this.navScroll = this.navScroll.bind(this)
 		this.reloadPacks = this.reloadPacks.bind(this)
@@ -101,28 +89,6 @@ class App extends Component {
 		localStorage.mauFrequentlyUsedStickerCache = JSON.stringify(stickers.map(sticker => [sticker.id, sticker]))
 	}
 
-	searchStickers(e) {
-		const sanitizeString = s => s.toLowerCase().trim()
-		const searchTerm = sanitizeString(e.target.value)
-
-		const allPacks = [this.state.frequentlyUsed, ...this.state.packs]
-		const packsWithFilteredStickers = allPacks.map(pack => ({
-			...pack,
-			stickers: pack.stickers.filter(sticker =>
-				sanitizeString(sticker.body).includes(searchTerm) ||
-				sanitizeString(sticker.id).includes(searchTerm)
-			),
-		}))
-
-		this.setState({
-			filtering: {
-				...this.state.filtering,
-				searchTerm,
-				packs: packsWithFilteredStickers.filter(({ stickers }) => !!stickers.length),
-			},
-		})
-	}
-
 	setStickersPerRow(val) {
 		localStorage.mauStickersPerRow = val
 		document.documentElement.style.setProperty("--stickers-per-row", localStorage.mauStickersPerRow)
@@ -145,16 +111,13 @@ class App extends Component {
 	reloadPacks() {
 		this.imageObserver.disconnect()
 		this.sectionObserver.disconnect()
-		this.setState({
-			packs: defaultState.packs,
-			filtering: defaultState.filtering,
-		})
+		this.setState({ packs: [] })
 		this._loadPacks(true)
 	}
 
 	_loadPacks(disableCache = false) {
 		const cache = disableCache ? "no-cache" : undefined
-		fetch(INDEX, { cache }).then(async indexRes => {
+		fetch(`${PACKS_BASE_URL}/index.json`, { cache }).then(async indexRes => {
 			if (indexRes.status >= 400) {
 				this.setState({
 					loading: false,
@@ -166,12 +129,7 @@ class App extends Component {
 			HOMESERVER_URL = indexData.homeserver_url || HOMESERVER_URL
 			// TODO only load pack metadata when scrolled into view?
 			for (const packFile of indexData.packs) {
-				let packRes
-				if (packFile.startsWith("https://") || packFile.startsWith("http://")) {
-					packRes = await fetch(packFile, { cache })
-				} else {
-					packRes = await fetch(`${PACKS_BASE_URL}/${packFile}`, { cache })
-				}
+				const packRes = await fetch(`${PACKS_BASE_URL}/${packFile}`, { cache })
 				const packData = await packRes.json()
 				for (const sticker of packData.stickers) {
 					this.stickersByID.set(sticker.id, sticker)
@@ -262,14 +220,11 @@ class App extends Component {
 	}
 
 	navScroll(evt) {
-		this.navRef.scrollLeft += evt.deltaY
+		this.navRef.scrollLeft += evt.deltaY * 12
 	}
 
 	render() {
 		const theme = `theme-${this.state.theme}`
-		const filterActive = !!this.state.filtering.searchTerm
-		const packs = filterActive ? this.state.filtering.packs : [this.state.frequentlyUsed, ...this.state.packs]
-
 		if (this.state.loading) {
 			return html`<main class="spinner ${theme}"><${Spinner} size=${80} green /></main>`
 		} else if (this.state.error) {
@@ -280,17 +235,15 @@ class App extends Component {
 		} else if (this.state.packs.length === 0) {
 			return html`<main class="empty ${theme}"><h1>No packs found 😿</h1></main>`
 		}
-
 		return html`<main class="has-content ${theme}">
 			<nav onWheel=${this.navScroll} ref=${elem => this.navRef = elem}>
 				<${NavBarItem} pack=${this.state.frequentlyUsed} iconOverride="recent" />
 				${this.state.packs.map(pack => html`<${NavBarItem} id=${pack.id} pack=${pack}/>`)}
 				<${NavBarItem} pack=${{ id: "settings", title: "Settings" }} iconOverride="settings" />
 			</nav>
-			<${SearchBox} onKeyUp=${this.searchStickers} />
 			<div class="pack-list ${isMobileSafari ? "ios-safari-hack" : ""}" ref=${elem => this.packListRef = elem}>
-				${filterActive && packs.length === 0 ? html`<div class="search-empty"><h1>No stickers match your search</h1></div>` : null}
-				${packs.map(pack => html`<${Pack} id=${pack.id} pack=${pack} send=${this.sendSticker} />`)}
+				<${Pack} pack=${this.state.frequentlyUsed} send=${this.sendSticker} />
+				${this.state.packs.map(pack => html`<${Pack} id=${pack.id} pack=${pack} send=${this.sendSticker} />`)}
 				<${Settings} app=${this}/>
 			</div>
 		</main>`
@@ -356,7 +309,7 @@ const Pack = ({ pack, send }) => html`
 
 const Sticker = ({ content, send }) => html`
 	<div class="sticker" onClick=${send} data-sticker-id=${content.id}>
-		<img data-src=${makeThumbnailURL(content.url)} alt=${content.body} title=${content.body} />
+		<img data-src=${makeThumbnailURL(content.url)} alt=${content.body} />
 	</div>
 `
 
