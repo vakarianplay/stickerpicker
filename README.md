@@ -1,8 +1,7 @@
 # Maunium sticker picker
 A fast and simple Matrix sticker picker widget. Tested on Element Web, Android & iOS.
 
-## Discussion
-Matrix room: [`#stickerpicker:maunium.net`](https://matrix.to/#/#stickerpicker:maunium.net)
+
 
 ## Instructions
 For setup and usage instructions, please visit the [wiki](https://github.com/maunium/stickerpicker/wiki):
